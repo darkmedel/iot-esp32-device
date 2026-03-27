@@ -1,4 +1,5 @@
 #include "config.h"
+#include "logger.h"
 #include "globals.h"
 #include "device_config.h"
 #include "device_reset.h"
@@ -13,7 +14,6 @@
 // ================================
 // Estado global
 // ================================
-
 bool wifiConnected = false;
 bool wsConnected = false;
 bool cloudReachable = false;
@@ -31,7 +31,6 @@ unsigned long uptimeSeconds = 0;
 // ================================
 // LED inteligente
 // ================================
-
 void UpdateLed()
 {
   if (IsConfigPortalRunning())
@@ -66,95 +65,68 @@ void UpdateLed()
   LedStatus_Tick();
 }
 
+static void PrintBootSummary()
+{
+  LOG_INFO("");
+  LOG_INFO("[BOOT] ESP32 IoT Device");
+  LOG_INFOF("[BOOT] DeviceId: ", deviceId);
+  LOG_INFOF("[BOOT] Firmware: ", FW_VERSION);
+
+#if CURRENT_LOG_LEVEL >= LOG_LEVEL_DEBUG
+  LOG_DEBUGF("[BOOT] Chip Model: ", ESP.getChipModel());
+  LOG_DEBUGF("[BOOT] Chip Revision: ", ESP.getChipRevision());
+  LOG_DEBUGF("[BOOT] CPU Cores: ", ESP.getChipCores());
+  LOG_DEBUGF("[BOOT] CPU Frequency MHz: ", getCpuFrequencyMhz());
+  LOG_DEBUGF("[BOOT] Flash Size: ", ESP.getFlashChipSize());
+  LOG_DEBUGF("[BOOT] Free Heap: ", ESP.getFreeHeap());
+  LOG_DEBUGF("[BOOT] SDK Version: ", ESP.getSdkVersion());
+#endif
+}
+
 // ================================
 // Setup
 // ================================
-
 void setup()
 {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println();
-  Serial.println("ESP32 IoT Device Boot");
-  Serial.println("----------------------");
-
-  // Generar deviceId único
   uint64_t chipid = ESP.getEfuseMac();
   char id[13];
-
-  sprintf(id, "%04X%08X",
-          (uint16_t)(chipid >> 32),
-          (uint32_t)chipid);
-
+  sprintf(id, "%04X%08X", (uint16_t)(chipid >> 32), (uint32_t)chipid);
   deviceId = String(id);
 
-  Serial.print("DEVICE ID: ");
-  Serial.println(deviceId);
+  PrintBootSummary();
 
-  Serial.print("Chip Model: ");
-  Serial.println(ESP.getChipModel());
-
-  Serial.print("Chip Revision: ");
-  Serial.println(ESP.getChipRevision());
-
-  Serial.print("CPU Cores: ");
-  Serial.println(ESP.getChipCores());
-
-  Serial.print("CPU Frequency: ");
-  Serial.println(getCpuFrequencyMhz());
-
-  Serial.print("Flash Size: ");
-  Serial.println(ESP.getFlashChipSize());
-
-  Serial.print("Free Heap: ");
-  Serial.println(ESP.getFreeHeap());
-
-  Serial.print("SDK Version: ");
-  Serial.println(ESP.getSdkVersion());
-
-  // LED
   LedStatus_Init(LED_PIN);
   LedStatus_Set(LED_BOOT);
 
-  // Inicializar config persistente
   DeviceConfig_Init();
 
-  // ================================
-  // Limpieza forzada (solo desarrollo)
-  // ================================
 #if FORCE_CLEAR_WIFI_CONFIG_ON_BOOT
-  Serial.println("FORCE CLEAR WIFI CONFIG ON BOOT");
+  LOG_WARN("[BOOT] FORCE_CLEAR_WIFI_CONFIG_ON_BOOT = true");
   DeviceConfig_ClearWifiConfig();
 #endif
 
-  // ================================
-  // Reset físico (GPIO4)
-  // ================================
   if (IsConfigResetRequested())
   {
-    Serial.println("Clearing stored WiFi configuration...");
+    LOG_WARN("[BOOT] Factory reset requested. Clearing stored WiFi configuration.");
     DeviceConfig_ClearWifiConfig();
-
     delay(500);
     ESP.restart();
   }
 
-  // ================================
-  // Flujo principal
-  // ================================
   if (DeviceConfig_HasWifiConfig())
   {
-    Serial.println("[BOOT] WiFi config found -> normal mode");
+    LOG_INFO("[BOOT] WiFi config found -> normal mode");
     initWiFi();
   }
   else
   {
-    Serial.println("[BOOT] No WiFi config -> starting portal");
+    LOG_WARN("[BOOT] No WiFi config -> starting portal");
     StartConfigPortal();
   }
 
-  // Inicializar módulos
   initButtons();
   Heartbeat_Init();
 }
@@ -162,14 +134,10 @@ void setup()
 // ================================
 // Loop principal
 // ================================
-
 void loop()
 {
   uptimeSeconds = millis() / 1000UL;
 
-  // ================================
-  // Portal activo
-  // ================================
   if (IsConfigPortalRunning())
   {
     UpdateLed();
@@ -177,17 +145,11 @@ void loop()
     return;
   }
 
-  // ================================
-  // WiFi
-  // ================================
   loopWiFi();
 
-  // ================================
-  // WebSocket
-  // ================================
   if (wifiConnected && !wsInitialized)
   {
-    Serial.println("[WS] Initializing WebSocket...");
+    LOG_INFO("[WS] Initializing WebSocket...");
     initWebSocket();
     wsInitialized = true;
   }
@@ -198,27 +160,14 @@ void loop()
   }
 
   loopWebSocket();
-
-  // ================================
-  // Botones
-  // ================================
   loopButtons();
 
-  // ================================
-  // Heartbeat
-  // ================================
-HeartbeatData hb;
-hb.deviceId = deviceId.c_str();
-hb.wsConnected = wsConnected;
-hb.eventQueueSize = eventQueueSize();
+  HeartbeatData hb;
+  hb.deviceId = deviceId.c_str();
+  hb.wsConnected = wsConnected;
+  hb.eventQueueSize = eventQueueSize();
 
-Serial.print("[HB] wsConnected(loop)=");
-Serial.println(wsConnected ? "true" : "false");
+  Heartbeat_Tick(hb);
 
-Heartbeat_Tick(hb);
-
-  // ================================
-  // LED
-  // ================================
   UpdateLed();
 }

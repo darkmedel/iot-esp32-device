@@ -1,5 +1,6 @@
 #include "heartbeat.h"
 #include "config.h"
+#include "logger.h"
 
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -11,10 +12,15 @@
 static unsigned long lastHeartbeat = 0;
 static bool forceNow = false;
 
+static bool lastSendFailed = false;
+static int lastHttpCode = 0;
+static unsigned long lastFailureLogAt = 0;
+
 // ===============================
 // HELPERS
 // ===============================
-static String BuildJson(const HeartbeatData& data) {
+static String BuildJson(const HeartbeatData& data)
+{
   String json;
   json.reserve(220);
 
@@ -41,8 +47,10 @@ static String BuildJson(const HeartbeatData& data) {
   return json;
 }
 
-static bool ShouldSend() {
-  if (forceNow) {
+static bool ShouldSend()
+{
+  if (forceNow)
+  {
     return true;
   }
 
@@ -50,26 +58,60 @@ static bool ShouldSend() {
   return (now - lastHeartbeat) >= HEARTBEAT_INTERVAL;
 }
 
-static void MarkAttemptDone() {
+static void MarkAttemptDone()
+{
   lastHeartbeat = millis();
   forceNow = false;
+}
+
+static void LogFailureThrottled(const String& message)
+{
+  unsigned long now = millis();
+
+  if (!lastSendFailed || (now - lastFailureLogAt) >= HEARTBEAT_FAIL_LOG_INTERVAL)
+  {
+    LOG_WARN(message);
+    lastFailureLogAt = now;
+  }
+
+  lastSendFailed = true;
+}
+
+static void MarkRecoveredIfNeeded(int httpCode)
+{
+  if (lastSendFailed)
+  {
+    String msg = "[HB] Recovered. HTTP ";
+    msg += httpCode;
+    LOG_INFO(msg);
+  }
+
+  lastSendFailed = false;
+  lastHttpCode = httpCode;
 }
 
 // ===============================
 // API
 // ===============================
-void Heartbeat_Init() {
+void Heartbeat_Init()
+{
   lastHeartbeat = millis();
   forceNow = false;
+  lastSendFailed = false;
+  lastHttpCode = 0;
+  lastFailureLogAt = 0;
 }
 
-void Heartbeat_Tick(const HeartbeatData& data) {
-  if (!ShouldSend()) {
+void Heartbeat_Tick(const HeartbeatData& data)
+{
+  if (!ShouldSend())
+  {
     return;
   }
 
-  if (!WiFi.isConnected()) {
-    Serial.println("[HB] HEARTBEAT FAILED - WiFi disconnected");
+  if (!WiFi.isConnected())
+  {
+    LogFailureThrottled("[HB] Skipped: WiFi disconnected");
     MarkAttemptDone();
     return;
   }
@@ -78,17 +120,13 @@ void Heartbeat_Tick(const HeartbeatData& data) {
   HTTPClient http;
   String payload = BuildJson(data);
 
-  // ===============================
-  // DEBUG DE DIAGNÓSTICO
-  // ===============================
-  Serial.print("[HB] wsConnected(data)=");
-  Serial.println(data.wsConnected ? "true" : "false");
+#if CURRENT_LOG_LEVEL >= LOG_LEVEL_DEBUG
+  LOG_DEBUGF("[HB] payload=", payload);
+#endif
 
-  Serial.print("[HB] payload=");
-  Serial.println(payload);
-
-  if (!http.begin(client, HEARTBEAT_URL)) {
-    Serial.println("[HB] HEARTBEAT FAILED - http.begin error");
+  if (!http.begin(client, HEARTBEAT_URL))
+  {
+    LogFailureThrottled("[HB] Failed: http.begin error");
     MarkAttemptDone();
     return;
   }
@@ -98,19 +136,24 @@ void Heartbeat_Tick(const HeartbeatData& data) {
   http.addHeader("Content-Type", "application/json");
 
   int httpCode = http.POST(payload);
+  http.end();
 
-  if (httpCode > 0) {
-    Serial.print("[HB] HEARTBEAT SENT - HTTP ");
-    Serial.println(httpCode);
-  } else {
-    Serial.print("[HB] HEARTBEAT FAILED - HTTP ");
-    Serial.println(httpCode);
+  if (httpCode > 0)
+  {
+    MarkRecoveredIfNeeded(httpCode);
+  }
+  else
+  {
+    String msg = "[HB] Failed. HTTP ";
+    msg += httpCode;
+    LogFailureThrottled(msg);
+    lastHttpCode = httpCode;
   }
 
-  http.end();
   MarkAttemptDone();
 }
 
-void Heartbeat_Force() {
+void Heartbeat_Force()
+{
   forceNow = true;
 }
