@@ -78,6 +78,15 @@ void Heartbeat_Tick(const HeartbeatData& data) {
   HTTPClient http;
   String payload = BuildJson(data);
 
+  // ===============================
+  // DEBUG DE DIAGNÓSTICO
+  // ===============================
+  Serial.print("[HB] wsConnected(data)=");
+  Serial.println(data.wsConnected ? "true" : "false");
+
+  Serial.print("[HB] payload=");
+  Serial.println(payload);
+
   if (!http.begin(client, HEARTBEAT_URL)) {
     Serial.println("[HB] HEARTBEAT FAILED - http.begin error");
     MarkAttemptDone();

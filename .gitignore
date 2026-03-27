@@ -1,0 +1,17 @@
+# Archivos temporales Arduino
+*.ino.cpp
+*.ino.cpp.o
+*.elf
+*.bin
+
+# Build
+/build/
+*.hex
+
+# Config local
+.vscode/
+*.log
+
+# Mac / Windows
+.DS_Store
+Thumbs.db

@@ -207,12 +207,15 @@ void loop()
   // ================================
   // Heartbeat
   // ================================
-  HeartbeatData hb;
-  hb.deviceId = deviceId.c_str();
-  hb.wsConnected = wsConnected;
-  hb.eventQueueSize = eventQueueSize();
+HeartbeatData hb;
+hb.deviceId = deviceId.c_str();
+hb.wsConnected = wsConnected;
+hb.eventQueueSize = eventQueueSize();
 
-  Heartbeat_Tick(hb);
+Serial.print("[HB] wsConnected(loop)=");
+Serial.println(wsConnected ? "true" : "false");
+
+Heartbeat_Tick(hb);
 
   // ================================
   // LED
